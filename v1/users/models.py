@@ -16,6 +16,9 @@ class Users(base):
     validation_date: Optional[datetime] = Column(TIMESTAMP(timezone=True), nullable=True)
     is_active: bool = Column(Boolean, nullable=False)
 
+    class Config:
+        from_attributes = True
+
 
 
 # This class is ised by Pydantic, which validated the data recieved from the request

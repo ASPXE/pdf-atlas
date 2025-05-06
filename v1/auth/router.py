@@ -23,7 +23,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 20 # 20 minutes
 bcrypt_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Each endpoint must have this dependency to check if the token is valid
-oauth2_bearer = OAuth2PasswordBearer(tokenUrl='auth/token')
+oauth2_bearer = OAuth2PasswordBearer(tokenUrl='v1/auth/token')
 
 auth_router = APIRouter(
     prefix="/auth",
@@ -92,13 +92,16 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
 @auth_router.post("/token", response_model=Token)
 async def token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: db_dependency):
 
-    user = authenticate_user(db, form_data.email, form_data.passwd_auth)
+    user = authenticate_user(db, form_data.username, form_data.password)
 
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail='Credentials not validated')
 
-    token = create_access_token(user.email, user.id_users, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    token = create_access_token(
+        email=user.email,
+        id_users=user.id_users,
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
 
     return {'access_token': token, 'token_type': 'Bearer'}
-
