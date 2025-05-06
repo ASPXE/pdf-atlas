@@ -4,7 +4,8 @@ from pdf2image import convert_from_bytes
 import pytesseract
 from datetime import datetime, timezone
 from v1.scans.models import Scans
-from v1.bd.database import db_dependency
+from v1.bd.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
 
 scans_router = APIRouter(
     prefix="/scans",
@@ -28,13 +29,10 @@ def extract_text_from_pdf(pdf_bytes):
 
 
 @scans_router.post("/upload-pdf")
-async def upload_pdf(
-    db: db_dependency,
-    file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
-):
+async def upload_pdf(db: AsyncSession = Depends(get_db), file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+
     if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="File muest be a PDF.")
+        raise HTTPException(status_code=400, detail="File must be a PDF.")
 
     file_bytes = await file.read()
     scan_started = datetime.now(timezone.utc)

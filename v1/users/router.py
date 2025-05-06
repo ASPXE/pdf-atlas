@@ -12,3 +12,5 @@ users_router = APIRouter(
 @users_router.get("/greetings")
 async def greetings():
     return {"message": "Welcome to the Users endpoint!"}
+
+# TODO: Create the endpoints to edit the email and password. 

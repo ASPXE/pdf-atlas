@@ -11,7 +11,7 @@ class Scans(base):
     scan_ended = Column(TIMESTAMP(timezone=True), nullable=True)
     file_name = Column(Text, nullable=False)
     file_bytes_size = Column(Float, nullable=False)
-    user_id = Column(Integer, ForeignKey("pdf_atlas.users.id_users"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id_users"), nullable=False)
 
     class Config:
         from_attributes = True

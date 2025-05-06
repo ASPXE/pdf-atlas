@@ -1,28 +1,28 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
-from v1.bd.database import db_dependency
+from v1.bd.database import get_db
 from v1.users.models import CreateUserRequest, Users
 from datetime import datetime, timezone, timedelta
-from http import HTTPStatus
-from http.client import HTTPResponse
 from typing import Annotated
 from v1.auth.models import Token
 import os
 from dotenv import load_dotenv
 from passlib.context import CryptContext
-from starlette import status # Returns the HTPP Responses
+from starlette import status  # Returns the HTTP Responses
 from jose import jwt, JWTError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-# Loads the data fron .env file
+# Loads the data from .env file
 load_dotenv()
 
 ALGORITHM = os.getenv("ALGORITHM")
 SECRET = os.getenv("SECRET")
-ACCESS_TOKEN_EXPIRE_MINUTES = 20 # 20 minutes
+ACCESS_TOKEN_EXPIRE_MINUTES = 20  # 20 minutes
 
 bcrypt_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Each endpoint must have this dependency to check if the token is valid
+# OAuth2PasswordBearer for token retrieval
 oauth2_bearer = OAuth2PasswordBearer(tokenUrl='v1/auth/token')
 
 auth_router = APIRouter(
@@ -36,19 +36,45 @@ auth_router = APIRouter(
 async def greetings():
     return {"message": "Welcome to auth router!"}
 
+
+# Function to check if the email is available
+async def check_available_email(db: AsyncSession, email: str) -> bool:
+    stmt = select(Users).where(Users.email == email)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+    return user is None
+
+
+# Sign-up endpoint
 @auth_router.post("/sign-up", status_code=status.HTTP_201_CREATED)
-async def sign_up(db: db_dependency, create_user_form: CreateUserRequest):
+async def sign_up(
+    create_user_form: CreateUserRequest,  # Receive the data as CreateUserRequest
+    db: AsyncSession = Depends(get_db)  # Inject db session
+):
+    # Check if the email is available
+    is_available = await check_available_email(db, create_user_form.email)
 
-    create_user_model = Users(
-        passwd_auth = bcrypt_context.hash(create_user_form.passwd_auth), # Hashes the password
-        email = create_user_form.email,
-        creation_date = datetime.now(timezone.utc),
-        validation_date = None, # All new Users are not validated
-        is_active = True # All new accounts are active
-    )    
+    if not is_available:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already taken"
+        )
 
-    db.add(create_user_model)
-    db.commit()
+    # Create the new user
+    new_user = Users(
+        passwd_auth=bcrypt_context.hash(create_user_form.passwd_auth),  # Hash password
+        email=create_user_form.email,
+        creation_date=datetime.now(timezone.utc),
+        validation_date=None,
+        is_active=True
+    )
+
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+
+    return {"message": "User created successfully", "user": new_user}
+
 
 def create_access_token(email: str, id_users: int, expires_delta: timedelta):
     # Data to hash the token
@@ -64,22 +90,27 @@ def create_access_token(email: str, id_users: int, expires_delta: timedelta):
     encode.update({'exp': expire})
 
     # Encodes the token
-    return jwt.encode(encode, SECRET, algorithm=ALGORITHM) 
+    return jwt.encode(encode, SECRET, algorithm=ALGORITHM)
 
 
-def authenticate_user(db: db_dependency, email: str, passwd_auth: str):
-    user = db.query(Users).filter(Users.email == email).first()
+def authenticate_user(db: AsyncSession, email: str, passwd_auth: str):
+    stmt = select(Users).filter(Users.email == email)
+    result = db.execute(stmt)
+    user = result.scalar_one_or_none()
+    
     if not user:
         return False
     if not bcrypt_context.verify(passwd_auth, user.passwd_auth):
         return False
-    return user  
+    return user
 
+
+# Current user validation (decoding the token)
 async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
     try:
         payload = jwt.decode(token, SECRET, algorithms=[ALGORITHM])
-        username: str = payload.get('sub') # email
-        user_id: int = payload.get('id') # id_users
+        username: str = payload.get('sub')  # email
+        user_id: int = payload.get('id')  # id_users
         if username is None or user_id is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                                 detail='Credentials not validated')
@@ -88,11 +119,11 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail='Credentials not validated')
 
+
 # Endpoint that sends the auth token and validates the user
 @auth_router.post("/token", response_model=Token)
-async def token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: db_dependency):
-
-    user = authenticate_user(db, form_data.username, form_data.password)
+async def token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: AsyncSession = Depends(get_db)):
+    user = await authenticate_user(db, form_data.username, form_data.password)
 
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
@@ -105,3 +136,4 @@ async def token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: 
     )
 
     return {'access_token': token, 'token_type': 'Bearer'}
+
